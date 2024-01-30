@@ -28,6 +28,16 @@ from .serializers import MenuItemSerializer, CartSerializer,OrderSerializer, Ord
 class MenuItemViewSet(viewsets.ModelViewSet):
     queryset = MenuItem.objects.all()
     serializer_class = MenuItemSerializer
+    authentication_classes = [TokenAuthentication]
+    # permission_classes = [IsManager]
+    def get_permissions(self):
+        print(self.action)
+        if self.action in ['list','retrieve']:
+            return [IsAuthenticated()]
+        elif self.action in ['create','partial_update','update','destroy']:
+            return [IsManager()]
+        else:
+            return [IsAuthenticated()]
 
 # class CartView(viewsets.ModelViewSet):                #test
 #     queryset = Cart.objects.all()
@@ -118,38 +128,98 @@ class OrderViewSet(APIView):
             except User.DoesNotExist:
                 return Response({"detail":"User not found."},status=status.HTTP_404_NOT_FOUND)
             
-            # get items from cart
-            cart_items = Cart.objects.filter(user_id=user_details.id)
-            if cart_items:
-                # create new order id for the user
-                order = Order.objects.create(user_id = user_details.id)  
-                total = 0.0
-                # create order item with new order id
-                for item in cart_items:
-                    orderitem = OrderItem.objects.create(
-                        order_id = order.id, 
-                        menuitem_id = item.menuitem_id,
-                        quantity = item.quantity,
-                        unit_price = item.unit_price,
-                        price = item.price
-                    )
-                    total += float(item.price)
-                    item.delete()
-                order.total = total
-                order.save()
-            
-            try:
-                order = Order.objects.get(user_id = user_details.id)
-            except Order.DoesNotExist:
-                return Response({"detail":"You don't have any orders yet"}, status=status.HTTP_200_OK)
-            if order:
-                serializer = OrderSerializer(order)
+            orders = Order.objects.filter(user_id = user_details.id)
+            if orders:
+                serializer = OrderSerializer(orders, many=True)
                 # orderitems = OrderItem.objects.filter(order_id = order.id)
                 # serializer = OrderItemSerializer(orderitems, many=True)
                 return Response(serializer.data, status=status.HTTP_200_OK)      
-
+            return Response({"detail":"You don't have any orders yet"}, status=status.HTTP_200_OK)
     def post(self, request):
-        return Response({"detail":"Welcome Delivery Crew"},status=status.HTTP_201_CREATED)
+        user = request.user
+        try:
+            user_details = User.objects.get(id=user.id)
+        except User.DoesNotExist:
+            return Response({"detail":"User not found."},status=status.HTTP_404_NOT_FOUND)
+        
+        # get items from cart
+        cart_items = Cart.objects.filter(user_id=user_details.id)
+        if cart_items:
+            # create new order id for the user
+            order = Order.objects.create(user_id = user_details.id)
+
+            total = 0.0
+            # create order item with new order id
+            for item in cart_items:
+                orderitem = OrderItem.objects.create(
+                    order_id = order.id, 
+                    menuitem_id = item.menuitem_id,
+                    quantity = item.quantity,
+                    unit_price = item.unit_price,
+                    price = item.price
+                )
+                total += float(item.price)
+                item.delete()
+            order.total = total
+            order.save()
+            return Response({"detail":"All items added to the cart"}, status=status.HTTP_201_CREATED)
+        return Response({"detail":"You don't have any items in the cart"},status=status.HTTP_404_NOT_FOUND)
+
+# View for single order management
+class SingleOrderViewSet(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, orderId):
+        user = request.user
+        try:
+            order = Order.objects.get(id=orderId)
+        except Order.DoesNotExist:
+            return Response({"detail":"Order Id doesn't exists"}, status=status.HTTP_404_NOT_FOUND)
+            
+        if user.id == order.user_id:
+            orderitems = OrderItem.objects.filter(order_id=order.id)
+            serializer = OrderItemSerializer(orderitems, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response({"detail":"OrderId doesn't belong to you."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    def put(self, request, orderId):
+        try:
+            order = Order.objects.get(id=orderId)
+        except Order.DoesNotExist:
+            return Response({"detail":"Order Id doesn't exists"}, status=status.HTTP_404_NOT_FOUND)
+        if IsManager().has_permission(request, self):
+            deliverycrew_id = request.data.get('delivery_crew')
+            status_order = request.data.get('status')
+            if deliverycrew_id:
+                order.delivery_crew_id = deliverycrew_id
+            if status:
+                order.status = status_order
+        elif IsDeliveryCrew().has_permission(request, request):
+            if order.delivery_crew_id == request.user.id:
+                status_order = request.data.get('status')
+                if status:
+                    order.status = status_order
+        # user = request.user       
+        # if user.id == order.user_id:
+        #     pass
+        order.save()
+        return Response({"detail":"Order updated"}, status=status.HTTP_201_CREATED)
+
+        
+    
+    def delete(self, request, orderId):
+        user = request.user
+        if IsManager().has_permission(request, self):
+            try:
+                order = Order.objects.get(id=orderId)
+            except Order.DoesNotExist:
+                return Response({"detail":"Order Id doesn't exists"}, status=status.HTTP_404_NOT_FOUND)
+                
+            order.delete()
+            return Response({"detail":"Order Deleted"}, status=status.HTTP_200_OK)
+        return Response({"detail":"You don't have the required permission"}, status=status.HTTP_403_FORBIDDEN)
+
 
 # View for user group management
 class UserGroupManagement(APIView):

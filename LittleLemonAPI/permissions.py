@@ -6,7 +6,10 @@ class IsManager(BasePermission):
     """
 
     def has_permission(self, request, view):
-        return request.user.groups.filter(name='Manager').exists()
+        if request.user.groups.filter(name='Manager').exists():
+            return True
+        return False
+    
     
 class IsDeliveryCrew(BasePermission):
     """

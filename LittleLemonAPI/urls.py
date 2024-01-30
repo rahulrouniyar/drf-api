@@ -13,5 +13,6 @@ urlpatterns = [
     path('group/manager/users/', views.UserGroupManagement.as_view(), name='managergroup' ),
     path('group/delivery-crew/users/', views.DeliveryGroupManagement.as_view(), name='deliverygroup' ),
     path('orders/', views.OrderViewSet.as_view(), name='orders'),
+    path('orders/<int:orderId>/', views.SingleOrderViewSet.as_view(), name='orderitem-detail'),
 ]
 
